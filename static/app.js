@@ -167,7 +167,9 @@ async function loadList() {
     pill.textContent = d.status === "review" ? (kind ? kind.label : "To check") : STATE[d.status] || d.status;
     const type = document.createElement("span");
     type.className = "pill type"; type.textContent = what;
-    $(".s", li).append(type, pill, document.createTextNode([d.date, d.owner].filter(Boolean).join(" · ")));
+    const when = document.createElement("span");
+    when.className = "when"; when.textContent = [d.date, d.owner].filter(Boolean).join(" · ");
+    $(".s", li).append(type, pill, when);
     $(".amt", li).textContent = money(d.total);
     const open = () => openDoc(d.id);
     li.onclick = open; li.onkeydown = (e) => e.key === "Enter" && open();

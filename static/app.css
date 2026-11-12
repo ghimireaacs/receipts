@@ -168,3 +168,4 @@ input:focus-visible, select:focus-visible, button:focus-visible, .shutter:focus-
 .pill.type { background: transparent; border: 1px solid var(--line); color: var(--muted); }
 button.small { padding: 6px 12px; font-size: 0.9rem; }
 .top.bar #doc-cancel { margin-left: auto; }
+.doc .s .when { white-space: nowrap; }

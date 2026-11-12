@@ -20,6 +20,16 @@ Receipts is a self-hosted phone app for receipts, bills and household paperwork.
 
 The model runs in [Ollama](https://ollama.com/). Nothing is sent to a cloud service.
 
+## Screenshots
+
+All the data below is made up.
+
+| Capture | To check | Checking a receipt |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/capture.png" width="240" alt="Capture screen: a large camera button, a person picker, and links to choose a photo or PDF or add an entry without a photo"> | <img src="docs/screenshots/to-check.png" width="240" alt="To check list with three receipts waiting, each marked Photo or Receipt, with date, person and total"> | <img src="docs/screenshots/check-receipt.png" width="240" alt="A receipt photo above the form with what the model read: kind, title, shop and address"> |
+| **Spending, by month** | **By quarter (dark mode)** | **Looking up an item** |
+| <img src="docs/screenshots/spending-month.png" width="240" alt="Spending for October: the total, a bar chart of the last eight months and totals by category"> | <img src="docs/screenshots/spending-quarter.png" width="240" alt="Spending by quarter in dark mode with eight quarters charted"> | <img src="docs/screenshots/item-search.png" width="240" alt="Item search for milk: the total spent and each purchase with date, shop and price"> |
+
 ## Why it exists
 
 It grew out of moving a household off Google Drive onto a self-hosted setup: Nextcloud for files, Immich for photos and Paperless for documents. That left two jobs none of them did on their own:

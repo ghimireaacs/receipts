@@ -16,36 +16,31 @@
 ![Wallos](https://img.shields.io/badge/works%20with-Wallos-8a5cf6)
 ![Immich](https://img.shields.io/badge/works%20with-Immich-4250af)
 
-A self-hosted phone app for receipts, bills and household paperwork. Take a photo, or pick a PDF, and a local vision model reads it: what it is, who issued it, the date, the total, the tax and every line item. The document is filed in [Paperless-ngx](https://docs.paperless-ngx.com/), and the purchase goes into an item-level spending ledger, so "how much did we spend on milk this year" has an answer.
+Receipts is a self-hosted phone app for receipts, bills and household paperwork. You take a photo or pick a PDF, and a vision model on your own hardware reads it: what kind of document it is, who issued it, the date, the total, the tax and each line item. The purchase goes into a ledger that tracks spending down to the item, so you can answer "how much did we spend on milk this year?" The document itself is filed in [Paperless-ngx](https://docs.paperless-ngx.com/).
 
-Everything runs on your own hardware. The model runs in [Ollama](https://ollama.com/), and nothing is sent to a cloud service.
+The model runs in [Ollama](https://ollama.com/). Nothing is sent to a cloud service.
 
 ## Why it exists
 
-It came out of moving a household off Google Drive onto a self-hosted setup: Nextcloud for files, Immich for photos and Paperless for documents. Two jobs were left that none of them did on their own:
+It grew out of moving a household off Google Drive onto a self-hosted setup: Nextcloud for files, Immich for photos and Paperless for documents. That left two jobs none of them did on their own:
 
-1. **Know where the money goes, down to the item.** Not just "groceries, $180" but what the milk, the petrol or a single spoon cost, and which shop it came from.
-2. **Keep the important papers findable.** Passports, visas, citizenship, bank and tax papers, insurance and bills, each filed with its dates and its expiry.
+1. Knowing where the money goes, down to the item. Not "groceries, $180", but what the milk, the petrol or a single spoon cost, and at which shop.
+2. Keeping the important papers findable: passports, visas, citizenship papers, bank and tax letters, insurance and bills, each filed with its dates and its expiry.
 
-The first attempt used what was already running. Photos went to an Immich album, a script handed them to Paperless, and a local model read them. It worked, and it showed what was wrong with that route:
+The first version used what was already running. Photos went into an Immich album, a script passed them to Paperless, and a local model read them. It worked, but living with it showed four problems. Bills ended up in the photo library, next to the holiday photos and in every backup of it. Capturing one on an iPhone took too many taps: camera, photo library, album, then waiting for the sync. Sometimes the model couldn't load at all, because Immich was analysing the same new picture on the same 6 GB graphics card. And there was nowhere to correct the model, which gets item categories wrong often enough that the totals drifted before anyone noticed.
 
-- **Bills ended up in the photo library**, next to the holiday photos, and in every backup of it.
-- **It took too many taps on an iPhone:** camera, photo library, album, wait for the sync.
-- **The model ran out of GPU memory**, because the photo app was analysing the same new picture at the same moment.
-- **There was nowhere to fix the model's mistakes.** A small model gets item categories wrong, and nobody saw it until the totals were off.
-
-So the capture moved into its own small app. The photo goes straight to the server and never touches the photo library. The model reads it, a person checks it, and only then is it filed. Spending lives in a single SQLite file rather than in spreadsheets. Bills hand their due date to Wallos, which already sends the household's payment reminders.
+So capture moved into its own small app. The photo goes straight to the server and never touches the photo library. The model reads it, a person checks it, and only then is it filed. Spending lives in a single SQLite file instead of a spreadsheet, and bills pass their due date to Wallos, which already sends the household's payment reminders.
 
 ## Design
 
-It is meant to stay small, and to do these few jobs well rather than many jobs somehow.
+The app is meant to stay small, and a few decisions keep it that way.
 
-- **One container, one database file.** Python, FastAPI and SQLite. It needs no database server, no queue and no build step for the phone app.
-- **The model only suggests.** Nothing counts until a person has confirmed it.
-- **Use what you already run.** Paperless does OCR and the archive, Wallos does reminders, Immich and your sign-in proxy are optional. Each is a URL and a key, and the app works without the optional ones.
-- **Local only.** Photos, PDFs and the model's answers stay on your own servers.
-- **Not a budgeting app.** It has no bank sync, budgets, accounts or forecasts, and no plans for them. It records what was spent, from the paper that proves it, and adds it up.
-- **Configured, not coded.** The household (how many people, their names, who is in charge), the document kinds and the categories are settings, not code changes.
+- It is one container with one database file: Python, FastAPI and SQLite. There is no database server or queue, and the phone app has no build step.
+- The model only makes suggestions. Nothing counts until a person has confirmed it.
+- It uses what you already run. Paperless does OCR and the archive, and Wallos does reminders. Immich and a sign-in proxy are optional. Each one is a URL and a key in `.env`.
+- Photos, PDFs and the model's answers stay on your own servers.
+- It is not a budgeting app. It has no bank sync, budgets, accounts or forecasts, and none are planned. It records what was spent, from the paper that proves it, and adds it up.
+- The household (how many people, their names, who can act for others), the document kinds and the categories are settings rather than code.
 
 ## People and permissions
 
@@ -60,21 +55,23 @@ The spending totals always cover the whole household. They show a breakdown per 
 
 ## What it does
 
-- **Capture.** One button opens the camera. You can also pick photos or PDFs from the phone. Photos taken without a connection to the server wait on the phone and are sent later.
-- **Reading.** A local vision model works out the kind of document (receipt, bill, ID document, visa, certificate, bank statement, payslip, insurance and more). For receipts and bills it reads the shop or biller, location, dates, total, GST, payment method, category and line items.
-- **To check.** Every document waits until a person confirms it. The form shows the photo next to what was read, and warns when the items don't add up to the total.
-- **Filing.** On confirm, Paperless gets the document type, storage path, correspondent, title, tags and custom fields. The ledger gets one row per purchase and one per item.
-- **Spending.** Totals by week, month or quarter, a chart of the last eight periods, breakdowns by category, shop and person, and a search across items.
-- **No receipt?** Add an expense by hand (petrol, cash). It counts in the ledger and the totals; nothing goes to Paperless.
-- **Duplicates.** The same file sent twice is refused. Two different photos of one receipt or bill are flagged when they share a barcode, the printed transaction or invoice number, the same shop, date and total, or (for bills) the same biller and amount within a month.
-- **Bills to Wallos (optional).** A confirmed bill with a due date creates or updates its entry in [Wallos](https://github.com/ellite/Wallos), which then sends the payment reminder through whatever channel Wallos is set up for (Mattermost, ntfy, email, Discord and others).
-- **Immich (optional).** Photos added to an [Immich](https://immich.app/) album named `Paperless` are taken in too, then removed from the album.
+| | |
+|---|---|
+| Capture | One button opens the camera, or you pick photos and PDFs from the phone. A photo taken while the server is out of reach waits on the phone and goes later. |
+| Reading | The model works out the kind of document: receipt, bill, ID document, visa, certificate, bank statement, payslip, insurance and more. For receipts and bills it reads the shop or biller, location, dates, total, tax, payment method, category and line items. |
+| To check | Every document waits for a person to confirm it. The form shows the photo next to what was read, and says when the items don't add up to the total. |
+| Filing | When you confirm, Paperless gets the document type, storage path, correspondent, title, tags and custom fields, and the ledger gets one row for the purchase and one for each item. |
+| Spending | Totals by week, month or quarter, a chart of the last eight periods, a breakdown by category, shop and person, and a search across items. |
+| No receipt | Petrol, cash, anything without paper can be typed in. It counts in the ledger and the totals and goes nowhere else. |
+| Duplicates | The same file sent twice is refused. Two different photos of one receipt or bill are flagged when they share a barcode, a printed transaction or invoice number, the same shop, date and total, or, for bills, the same biller and amount within a month. |
+| Bills to Wallos | Optional. A confirmed bill with a due date creates or updates its entry in [Wallos](https://github.com/ellite/Wallos), and Wallos sends the reminder on whatever channel you gave it (Mattermost, ntfy, email, Discord and others). |
+| Immich | Optional. Photos added to an [Immich](https://immich.app/) album named `Paperless` are taken in too, then removed from the album. |
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    phone["📱 Phone app<br/>photo · PDF · typed entry"] --> app["Receipts<br/>(one container)"]
+    phone["Phone app<br/>photo · PDF · typed entry"] --> app["Receipts<br/>(one container)"]
     immich["Immich album<br/>(optional)"] -.-> app
     app --> paperless["Paperless-ngx<br/>upload + OCR"]
     paperless --> model["Ollama<br/>vision model"]
@@ -146,9 +143,9 @@ Every connection is a URL and a key in `.env`; nothing has to be in the same Com
 
 ### Paperless-ngx
 
-- **`PAPERLESS_URL`:** the internal address, for example `http://192.0.2.10:8000`. A public HTTPS name works too.
-- **`PAPERLESS_TOKEN`:** a token for a user who may create documents, tags, fields and correspondents.
-- **Setup:** run `setup_paperless.py` once (step 4). These are the names it creates and the app looks up:
+- `PAPERLESS_URL`: the internal address, for example `http://192.0.2.10:8000`. A public HTTPS name works too.
+- `PAPERLESS_TOKEN`: a token for a user who may create documents, tags, fields and correspondents.
+- Setup: run `setup_paperless.py` once (step 4). These are the names it creates and the app looks up:
 
   | Kind | Names |
   |---|---|
@@ -157,33 +154,33 @@ Every connection is a URL and a key in `.env`; nothing has to be in the same Com
   | Storage paths | Receipts, Bills, Vital, Financial |
   | Custom fields | Amount, GST (monetary); Expense category, Payment method (select); Store location, Document number (text); Line items (long text); Due date, Expiry date, Issue date (date) |
 
-- **Your own names:** to file under names you already use, edit the `KINDS` table at the top of `bridge.py` before running the setup.
-- **Categories and payment methods** are the select options of the Expense category and Payment method fields. Edit them in Paperless; the app picks up changes within five minutes.
-- **Per-person tags:** give each person an owner tag in Paperless and put its id in `PEOPLE` (`Alex:17,Sam:18`). The id is in the address bar when you open the tag in Paperless.
+- Your own names: to file under names you already use, edit the `KINDS` table at the top of `bridge.py` before running the setup.
+- Categories and payment methods are the select options of the Expense category and Payment method fields. Edit them in Paperless; the app picks up changes within five minutes.
+- Per-person tags: give each person an owner tag in Paperless and put its id in `PEOPLE` (`Alex:17,Sam:18`). The id is in the address bar when you open the tag in Paperless.
 
 ### Ollama
 
-- **`OLLAMA_URL`:** for example `http://192.0.2.20:11434`. If Ollama is bundled with Open WebUI, use the address of the Ollama API port, not the Open WebUI page.
-- **`OLLAMA_MODEL`:** any vision model Ollama can serve. `gemma3:4b` fits a 6 GB card. Larger models read item categories better if you have the memory.
-- **A shared GPU** (Immich's machine learning, for example) is fine. When the model can't load, the worker waits and tries again for about three minutes, then leaves the document for you to fill in.
+- `OLLAMA_URL`: for example `http://192.0.2.20:11434`. If Ollama is bundled with Open WebUI, use the address of the Ollama API port, not the Open WebUI page.
+- `OLLAMA_MODEL`: any vision model Ollama can serve. `gemma3:4b` fits a 6 GB card. Larger models read item categories better if you have the memory.
+- A shared GPU (Immich's machine learning, for example) is fine. When the model can't load, the worker waits and tries again for about three minutes, then leaves the document for you to fill in.
 
 ### Wallos
 
-- **In Wallos:** Profile → API key. For notifications, set up the channel you want under Settings → Notifications.
-- **`WALLOS_URL`:** the internal address, for example `http://192.0.2.10:8282`.
-- **`WALLOS_CURRENCY_ID`:** your currency's id in Wallos.
-- **`WALLOS_NOTIFY_DAYS`:** how many days before the due date Wallos should remind you. Wallos reminds once, on the day exactly that many days ahead, so a bill filed later than that gets no reminder for its current due date.
-- **Matching** is by biller name. A new biller is added as monthly; change the cycle in Wallos once if it's quarterly. Later bills from the same biller update its price and due date.
+- In Wallos: Profile → API key. For notifications, set up the channel you want under Settings → Notifications.
+- `WALLOS_URL`: the internal address, for example `http://192.0.2.10:8282`.
+- `WALLOS_CURRENCY_ID`: your currency's id in Wallos.
+- `WALLOS_NOTIFY_DAYS`: how many days before the due date Wallos should remind you. Wallos reminds once, on the day exactly that many days ahead, so a bill filed later than that gets no reminder for its current due date.
+- Matching is by biller name. A new biller is added as monthly; change the cycle in Wallos once if it's quarterly. Later bills from the same biller update its price and due date.
 
 ### Immich
 
-- **`IMMICH_URL` and `IMMICH_API_KEY`** (Account Settings → API Keys). Create an album named `Paperless`, or set `ALBUM_NAME`, and share it with everyone who should use it.
-- **After filing:** photos owned by the key's account are archived out of the timeline, not deleted. Photos from other people are only taken out of the album.
+- `IMMICH_URL` and `IMMICH_API_KEY` (Account Settings → API Keys). Create an album named `Paperless`, or set `ALBUM_NAME`, and share it with everyone who should use it.
+- After filing: photos owned by the key's account are archived out of the timeline, not deleted. Photos from other people are only taken out of the album.
 
 ### Reverse proxy and sign-in
 
-- **Proxy only.** Point the proxy at `http://<host>:8098`. If the proxy runs on the same host, set `APP_BIND=127.0.0.1` so the port isn't open to the network. Keep `APP_PASSCODE` set.
-- **Forward-auth (Authentik, Authelia, oauth2-proxy).** Protect the route, leave `APP_PASSCODE` empty, and map usernames to people:
+- Proxy only. Point the proxy at `http://<host>:8098`. If the proxy runs on the same host, set `APP_BIND=127.0.0.1` so the port isn't open to the network. Keep `APP_PASSCODE` set.
+- Forward-auth (Authentik, Authelia, oauth2-proxy). Protect the route, leave `APP_PASSCODE` empty, and map usernames to people:
 
   ```env
   AUTH_PEOPLE=alex=Alex,sam=Sam
@@ -191,7 +188,7 @@ Every connection is a URL and a key in `.env`; nothing has to be in the same Com
   ```
 
   The app reads the username from the `X-authentik-username` header, and trusts it only when the connection itself comes from an address in `PROXY_IPS` (`X-Forwarded-For` is ignored, so the header can't be faked from elsewhere on the network). Requests with no known person are refused, including ones made straight to the app's port. With another proxy, pass its username header on under that name (Authelia sends `Remote-User`). Make the proxy's sessions long: phones close browser sessions often, and every expiry means signing in again.
-- **Traefik with Authentik's embedded outpost.** Put the forward-auth middleware on the app's router, and add a second router for `Host(...) && PathPrefix(/outpost.goauthentik.io/)` that goes to Authentik.
+- Traefik with Authentik's embedded outpost. Put the forward-auth middleware on the app's router, and add a second router for `Host(...) && PathPrefix(/outpost.goauthentik.io/)` that goes to Authentik.
 
 ## Settings
 
@@ -213,7 +210,7 @@ Every connection is a URL and a key in `.env`; nothing has to be in the same Com
 
 ## Your data
 
-- **The ledger** is one SQLite file, `DB_DIR/ledger.db`:
+- The ledger is one SQLite file, `DB_DIR/ledger.db`:
 
   | Table / view | Holds |
   |---|---|
@@ -226,9 +223,9 @@ Every connection is a URL and a key in `.env`; nothing has to be in the same Com
   select name, sum(price) from item_spend where name like '%milk%' group by name;
   ```
 
-- **Session key.** `DB_DIR/session.key` signs the passcode cookie; deleting it signs every phone out.
-- **Backups.** A copy of the ledger is written to `PHOTO_STORE/backup/ledger.db` once a day. Back up `PHOTO_STORE` with your other files. For a copy of the live file, pause the container for the few seconds it takes to copy `DB_DIR`.
-- **Privacy.** Photos and PDFs go only to your Paperless and your Ollama. Treat the app's address like Paperless's: ID papers can pass through it.
+- Session key. `DB_DIR/session.key` signs the passcode cookie; deleting it signs every phone out.
+- Backups. A copy of the ledger is written to `PHOTO_STORE/backup/ledger.db` once a day. Back up `PHOTO_STORE` with your other files. For a copy of the live file, pause the container for the few seconds it takes to copy `DB_DIR`.
+- Privacy. Photos and PDFs go only to your Paperless and your Ollama. Treat the app's address like Paperless's: ID papers can pass through it.
 
 ## Updating
 

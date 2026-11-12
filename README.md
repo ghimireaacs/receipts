@@ -85,7 +85,7 @@ The container is a small Python service: FastAPI for the app and its API, a back
 1. **Get the code and the settings file.**
 
    ```bash
-   git clone <this repository> receipts && cd receipts
+   git clone https://github.com/ghimireaacs/receipts.git && cd receipts
    cp .env.example .env
    ```
 

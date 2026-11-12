@@ -1,5 +1,21 @@
 # Receipts
 
+[![release](https://img.shields.io/github/v/tag/ghimireaacs/receipts?label=release&color=blue)](https://github.com/ghimireaacs/receipts/tags)
+[![licence](https://img.shields.io/github/license/ghimireaacs/receipts?color=green)](LICENSE)
+[![last commit](https://img.shields.io/github/last-commit/ghimireaacs/receipts/dev?label=last%20commit%20(dev))](https://github.com/ghimireaacs/receipts/commits/dev)
+![self-hosted](https://img.shields.io/badge/self--hosted-yes-2f6b4f)
+![local AI](https://img.shields.io/badge/AI-local%20(Ollama)-black)
+
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)
+![PWA](https://img.shields.io/badge/phone%20app-PWA-5A0FC8?logo=pwa&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-gemma3%3A4b-000000?logo=ollama&logoColor=white)
+![Paperless-ngx](https://img.shields.io/badge/works%20with-Paperless--ngx-17541f)
+![Wallos](https://img.shields.io/badge/works%20with-Wallos-8a5cf6)
+![Immich](https://img.shields.io/badge/works%20with-Immich-4250af)
+
 A self-hosted phone app for receipts, bills and household paperwork. Take a photo, or pick a PDF, and a local vision model reads it: what it is, who issued it, the date, the total, the tax and every line item. The document is filed in [Paperless-ngx](https://docs.paperless-ngx.com/), and the purchase goes into an item-level spending ledger, so "how much did we spend on milk this year" has an answer.
 
 Everything runs on your own hardware. The model runs in [Ollama](https://ollama.com/), and nothing is sent to a cloud service.
@@ -56,14 +72,17 @@ The spending totals always cover the whole household. They show a breakdown per 
 
 ## How it works
 
-```text
-phone app ───┐
-             ├──▶ receipts ──▶ Paperless (upload, OCR) ──▶ Ollama vision model
-Immich album ┘       │                                           │
-(optional)           ◀──────────────── what it read ──────────────┘
-                     │
-                     ├──▶ To check in the app ──▶ confirmed ──▶ Paperless fields + SQLite ledger
-                     └──▶ bills with a due date ──▶ Wallos (optional) ──▶ its reminders
+```mermaid
+flowchart LR
+    phone["📱 Phone app<br/>photo · PDF · typed entry"] --> app["Receipts<br/>(one container)"]
+    immich["Immich album<br/>(optional)"] -.-> app
+    app --> paperless["Paperless-ngx<br/>upload + OCR"]
+    paperless --> model["Ollama<br/>vision model"]
+    app --> model
+    model --> check["To check<br/>a person confirms"]
+    check --> ledger[("SQLite ledger<br/>purchases + items")]
+    check --> filed["Paperless fields<br/>type · tags · amounts"]
+    check -. "bills with a due date" .-> wallos["Wallos<br/>reminders"]
 ```
 
 The container is a small Python service: FastAPI for the app and its API, a background worker, and SQLite for the ledger. The phone app is plain HTML and JavaScript with no build step, and installs to the home screen as a web app.

@@ -1,0 +1,20 @@
+# Receipts: the phone app and the worker that files photos into Paperless.
+# DB_DIR holds the SQLite ledger (keep it on a local disk, not a network share);
+# PHOTO_STORE holds the photos and a daily copy of the ledger.
+name: receipt-bridge
+services:
+  receipt-bridge:
+    build: .
+    image: receipt-bridge:local
+    container_name: receipt-bridge
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8098}:8000"
+    volumes:
+      - ${DB_DIR:?set DB_DIR in .env}:/db
+      - ${PHOTO_STORE:?set PHOTO_STORE in .env}:/data
+    deploy:
+      resources:
+        limits:
+          memory: 768M

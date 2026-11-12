@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f4f1ea" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#181a17" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Receipts">
+<title>Receipts</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="lock" class="lock" hidden>
+  <form id="lock-form">
+    <h1>Receipts</h1>
+    <label for="passcode">Passcode</label>
+    <input id="passcode" type="password" inputmode="numeric" autocomplete="current-password" required>
+    <button class="primary" type="submit">Unlock</button>
+    <p id="lock-error" class="error" role="alert"></p>
+  </form>
+</div>
+
+<main id="app" hidden>
+  <section id="view-capture" class="view">
+    <header class="top">
+      <h1>Receipts</h1>
+      <div class="who" id="who" role="radiogroup" aria-label="Whose is this"></div>
+    </header>
+    <div class="capture">
+      <label class="shutter" for="camera">
+        <span class="shutter-ring" aria-hidden="true"></span>
+        <span class="shutter-text">Take photo</span>
+      </label>
+      <input id="camera" type="file" accept="image/*" capture="environment" hidden>
+      <label class="link" for="library">Choose a photo or PDF</label>
+      <input id="library" type="file" accept="image/*,application/pdf,.pdf" multiple hidden>
+      <button type="button" class="link" id="manual">Add without a photo</button>
+    </div>
+    <p id="send-status" class="send-status" aria-live="polite"></p>
+  </section>
+
+  <section id="view-check" class="view" hidden>
+    <header class="top">
+      <h1>To check</h1>
+      <div class="seg" role="tablist">
+        <button role="tab" data-show="check" aria-selected="true">To check</button>
+        <button role="tab" data-show="done" aria-selected="false">Filed</button>
+      </div>
+    </header>
+    <ul id="doc-list" class="doc-list"></ul>
+    <p id="doc-empty" class="empty" hidden></p>
+  </section>
+
+  <section id="view-doc" class="view" hidden>
+    <header class="top bar">
+      <button class="back" id="doc-back" aria-label="Back">‹ Back</button>
+      <span id="doc-state" class="state"></span>
+      <button type="button" class="danger small" id="doc-cancel" hidden>Delete</button>
+    </header>
+    <figure class="photo" id="doc-photo"></figure>
+    <p id="doc-error" class="notice" hidden></p>
+    <form id="doc-form" class="doc-form">
+      <label>Kind<select name="kind" id="f-kind"></select></label>
+      <label>Title<input name="title" autocomplete="off"></label>
+      <label>Shop or issuer<input name="issuer" autocomplete="off"></label>
+      <div class="spend-only"><label>Where<input name="location" autocomplete="off"></label></div>
+      <label>Date<input name="date" type="date"></label>
+      <div class="spend-only row2">
+        <label>Total $<input name="total" type="number" step="0.01" inputmode="decimal"></label>
+        <label>GST $<input name="gst" type="number" step="0.01" inputmode="decimal"></label>
+      </div>
+      <div class="spend-only row2">
+        <label>Paid by<select name="payment_method" id="f-method"></select></label>
+        <label>Category<select name="category" id="f-cat"></select></label>
+      </div>
+      <div class="field-due"><label>Due date<input name="due_date" type="date"></label></div>
+      <div class="field-vital row2">
+        <label>Issued<input name="issue_date" type="date"></label>
+        <label>Expires<input name="expiry_date" type="date"></label>
+      </div>
+      <div class="field-number"><label>Document number<input name="document_number" autocomplete="off"></label></div>
+
+      <fieldset class="spend-only items">
+        <legend>Items</legend>
+        <ul id="items"></ul>
+        <button type="button" class="link" id="add-item">+ Add item</button>
+        <p id="items-sum" class="items-sum"></p>
+      </fieldset>
+
+      <div class="actions">
+        <button class="primary" type="submit" id="save">Looks right, file it</button>
+        <button type="button" id="reread">Read again</button>
+        <button type="button" class="danger" id="delete">Delete</button>
+      </div>
+      <p class="hint" id="paperless-link"></p>
+    </form>
+  </section>
+
+  <section id="view-spend" class="view" hidden>
+    <header class="top">
+      <h1>Spending</h1>
+      <div class="seg" role="tablist" id="period-tabs">
+        <button role="tab" data-period="week" aria-selected="false">Week</button>
+        <button role="tab" data-period="month" aria-selected="true">Month</button>
+        <button role="tab" data-period="quarter" aria-selected="false">Quarter</button>
+      </div>
+    </header>
+    <select id="month" aria-label="Period" class="period-pick"></select>
+    <div class="total-card">
+      <span class="total-label" id="spend-count"></span>
+      <span class="total-amount" id="spend-total"></span>
+    </div>
+    <h2 id="trend-head">Last 8</h2>
+    <div class="trend" id="trend" role="list" aria-label="Spending over the last eight periods"></div>
+    <p class="trend-tip" id="trend-tip" aria-live="polite"></p>
+    <h2>By category</h2>
+    <ul id="spend-cats" class="bars"></ul>
+    <h2>By shop</h2>
+    <ul id="spend-shops" class="bars"></ul>
+    <h2 id="people-head">By person</h2>
+    <ul id="spend-people" class="bars"></ul>
+    <h2>Look up an item</h2>
+    <input id="item-q" type="search" placeholder="milk, spoon, petrol…" autocomplete="off">
+    <p id="item-total" class="item-total"></p>
+    <ul id="item-rows" class="item-rows"></ul>
+  </section>
+
+  <nav class="tabs" aria-label="Sections">
+    <button data-view="capture" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Capture</button>
+    <button data-view="check"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>To check<span class="badge" id="badge" hidden></span></button>
+    <button data-view="spend"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Spending</button>
+  </nav>
+</main>
+
+<template id="item-row">
+  <li class="item">
+    <input class="i-name" aria-label="Item" placeholder="Item">
+    <input class="i-price" aria-label="Price" type="number" step="0.01" inputmode="decimal" placeholder="0.00">
+    <select class="i-cat" aria-label="Item category"></select>
+    <button type="button" class="i-del" aria-label="Remove item">×</button>
+  </li>
+</template>
+<script src="app.js"></script>
+</body>
+</html>

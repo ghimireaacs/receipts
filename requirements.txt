@@ -1,0 +1,8 @@
+requests==2.32.3
+pillow==11.0.0
+pillow-heif==0.21.0
+fastapi==0.115.6
+uvicorn==0.34.0
+python-multipart==0.0.20
+zxing-cpp==2.2.0
+pypdfium2==4.30.0

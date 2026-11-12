@@ -281,7 +281,7 @@ function fillForm(d) {
   $("#save").textContent = d.status === "done" ? "Save changes" : "Looks right, file it";
   $("#reread").hidden = d.status === "duplicate" || !!d.manual;
   $("#delete").hidden = !d.id;
-  $("#paperless-link").textContent = [d.paperless_id ? `Paperless document ${d.paperless_id}${d.pdf ? " (PDF, first page shown)" : ""}` : "", d.wallos || ""].filter(Boolean).join(" · ");
+  $("#paperless-link").textContent = [d.paperless_id ? `Paperless document ${d.paperless_id}` : "", d.pdf ? "PDF, first page shown" : "", d.wallos || ""].filter(Boolean).join(" · ");
 }
 
 async function saveDoc(e) {
@@ -389,6 +389,10 @@ async function start() {
   if (!config) return;
   renderWho();
   fillSelect($("#f-kind"), config.kinds.map((k) => k.key), config.kinds.map((k) => k.label));
+  const tax = $("#doc-form").gst.closest("label");
+  if (tax && config.tax_label) tax.firstChild.textContent = config.tax_label + " ";
+  const tot = $("#doc-form").total.closest("label");
+  if (tot) tot.firstChild.textContent = "Total ";
   fillSelect($("#f-method"), config.methods);
   fillSelect($("#f-cat"), ["", ...config.categories]);
   flush();
@@ -425,7 +429,7 @@ $("#doc-cancel").onclick = async () => {
   try { await api("docs/" + current.id, { method: "DELETE" }); show("check"); } catch (e) { alert(e.message); }
 };
 $("#delete").onclick = async () => {
-  if (!confirm(current.manual ? "Delete this entry?" : "Delete this photo here and move it to the Paperless trash?")) return;
+  if (!confirm(current.manual || !config.paperless ? "Delete this entry?" : "Delete this photo here and move it to the Paperless trash?")) return;
   try { await api("docs/" + current.id, { method: "DELETE" }); show("check"); } catch (e) { alert(e.message); }
 };
 $("#month").onchange = (e) => loadSpending(e.target.value);

@@ -5,7 +5,7 @@ Photos arrive two ways: the phone app (web.py, the normal route) or the Immich a
 uploaded to Paperless for OCR, read by the local vision model, filed in Paperless, and written to
 the SQLite ledger. It then waits in the app's "To check" list until a person confirms the numbers.
 """
-import base64, io, json, os, re, sqlite3, threading, time, traceback, uuid
+import base64, hashlib, io, json, os, re, sqlite3, threading, time, traceback, uuid
 from datetime import datetime
 import requests
 from PIL import Image, ImageOps
@@ -17,7 +17,8 @@ pillow_heif.register_heif_opener()
 
 IMMICH = os.environ.get("IMMICH_URL", "").rstrip("/")
 IMMICH = IMMICH + "/api" if IMMICH else ""
-PAPERLESS = os.environ["PAPERLESS_URL"].rstrip("/") + "/api"
+PAPERLESS = os.environ.get("PAPERLESS_URL", "").rstrip("/")
+PAPERLESS = PAPERLESS + "/api" if PAPERLESS else ""   # empty: run without Paperless (ledger only)
 OLLAMA = os.environ["OLLAMA_URL"].rstrip("/")
 MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:4b")
 ALBUM = os.environ.get("ALBUM_NAME", "Paperless")
@@ -30,6 +31,24 @@ WALLOS_KEY = os.environ.get("WALLOS_API_KEY", "")
 WALLOS_NOTIFY_DAYS = int(os.environ.get("WALLOS_NOTIFY_DAYS", "3"))
 WALLOS_CURRENCY = int(os.environ.get("WALLOS_CURRENCY_ID", "1"))   # the currency's id in Wallos
 CURRENCY = os.environ.get("CURRENCY", "AUD").upper()   # ISO code, for Paperless amounts
+DATE_ORDER = os.environ.get("DATE_ORDER", "DMY").upper()   # how dates are printed locally: DMY, MDY or YMD
+TAX_LABEL = os.environ.get("TAX_LABEL", "GST")           # what receipts call the tax (GST, VAT, sales tax)
+
+# Without Paperless, categories and payment methods come from here (with Paperless: its select fields)
+DEFAULT_CATEGORIES = ["Groceries", "Household & kitchen", "Dining & takeaway", "Transport & fuel", "Utilities & internet",
+                      "Rent & housing", "Health & pharmacy", "Clothing", "Electronics & tech", "Subscriptions", "Education",
+                      "Gifts & donations", "Travel", "Entertainment", "Insurance", "Fees, tax & government",
+                      "Furniture & appliances", "Personal care", "Other"]
+DEFAULT_METHODS = ["Card", "Cash", "Bank transfer", "Direct debit", "Other"]
+
+
+def _list(name, default):
+    v = [x.strip() for x in os.environ.get(name, "").split(",") if x.strip()]
+    return v or default
+
+
+CATEGORIES = _list("CATEGORIES", DEFAULT_CATEGORIES)
+METHODS = _list("PAYMENT_METHODS", DEFAULT_METHODS)
 
 # PEOPLE=Name:paperless-owner-tag-id:immich-user-id,...  (the last two parts are optional)
 PEOPLE = []
@@ -40,7 +59,23 @@ for part in os.environ.get("PEOPLE", "").split(","):
                        "immich": bits[2] if len(bits) > 2 else None})
 
 im = requests.Session(); im.headers["x-api-key"] = os.environ.get("IMMICH_API_KEY", "")
-pl = requests.Session(); pl.headers.update({"Authorization": "Token " + os.environ["PAPERLESS_TOKEN"], "Accept": "application/json; version=9"})
+class PaperlessAuth(requests.auth.AuthBase):
+    """PAPERLESS_TOKEN, or a token fetched once with PAPERLESS_USER / PAPERLESS_PASSWORD."""
+    def __init__(self):
+        self.token = os.environ.get("PAPERLESS_TOKEN", "")
+
+    def __call__(self, r):
+        if not self.token and os.environ.get("PAPERLESS_USER") and PAPERLESS:
+            t = requests.post(f"{PAPERLESS}/token/", timeout=30,
+                              data={"username": os.environ["PAPERLESS_USER"], "password": os.environ.get("PAPERLESS_PASSWORD", "")})
+            t.raise_for_status()
+            self.token = t.json()["token"]
+        if self.token:
+            r.headers["Authorization"] = "Token " + self.token
+        return r
+
+
+pl = requests.Session(); pl.auth = PaperlessAuth(); pl.headers["Accept"] = "application/json; version=9"
 
 VITAL = ["Expiry date", "Issue date", "Document number"]
 # what the model may answer -> how Paperless files it (names are looked up, so ids never go stale)
@@ -96,7 +131,7 @@ def db():
         from items i join purchases p on p.id = i.purchase_id;
     """)
     cols = [r[1] for r in c.execute("pragma table_info(docs)")]
-    for col in ("barcode", "original", "wallos"):
+    for col in ("barcode", "original", "wallos", "sha256"):
         if col not in cols:
             c.execute(f"alter table docs add column {col} text")
     if "doc_id" not in [r[1] for r in c.execute("pragma table_info(purchases)")]:
@@ -154,6 +189,8 @@ def ref():
 
 
 def options(field_name):
+    if not PAPERLESS:
+        return CATEGORIES if field_name == "Expense category" else METHODS
     return [o["label"] for o in ref()["fields"][field_name]["extra_data"]["select_options"]]
 
 
@@ -239,7 +276,7 @@ def save_photo(raw, with_original=False):
 def photo_path(con, doc, small=True):
     """Path of a document's photo. Documents from before the app are fetched from Paperless once."""
     rel = doc["photo"]
-    if not rel and doc["paperless_id"]:
+    if not rel and doc["paperless_id"] and PAPERLESS:
         r = pl.get(f"{PAPERLESS}/documents/{doc['paperless_id']}/download/?original=true", timeout=120)
         if not r.ok:
             return None
@@ -251,14 +288,29 @@ def photo_path(con, doc, small=True):
     return path[:-4] + ".small.jpg" if small else path
 
 
+def pdf_text(path):
+    """The text layer of every page of a PDF (empty for a scanned PDF)."""
+    try:
+        pdf = pypdfium2.PdfDocument(path)
+        try:
+            return "\n".join(pdf[i].get_textpage().get_text_range() for i in range(len(pdf)))
+        finally:
+            pdf.close()
+    except Exception:
+        return ""
+
+
 def add_doc(con, raw, owner, source, source_ref, taken=None):
     """Queue a new photo. Returns the row id (the existing one if this photo was already sent)."""
     row = con.execute("select id from docs where source_ref=?", (source_ref,)).fetchone()
     if row:
         return row["id"]
+    digest = hashlib.sha256(raw).hexdigest()
+    same = con.execute("select id from docs where sha256=? and status not in ('deleted','duplicate')", (digest,)).fetchone()
     rel, original = save_photo(raw, with_original=True)
-    cur = con.execute("insert into docs (source, source_ref, owner, photo, original, status, taken, created_at, updated_at) values (?,?,?,?,?,?,?,?,?)",
-                      (source, source_ref, owner, rel, original, "queued", taken or datetime.now().strftime("%Y-%m-%d"), now(), now()))
+    status, error = ("duplicate", f"The same file as document {same['id']}. Delete this one.") if same else ("queued", None)
+    cur = con.execute("insert into docs (source, source_ref, owner, photo, original, status, error, sha256, taken, created_at, updated_at) values (?,?,?,?,?,?,?,?,?,?,?)",
+                      (source, source_ref, owner, rel, original, status, error, digest, taken or datetime.now().strftime("%Y-%m-%d"), now(), now()))
     con.commit()
     wake.set()
     return cur.lastrowid
@@ -285,13 +337,14 @@ def ask_model(jpeg, ocr_text):
         "items": {"type": "array", "items": item}},
         "required": ["kind", "title", "issuer", "location", "date", "total", "gst", "payment_method", "category", "items"]}
     prompt = (
-        "You file household paperwork. Look at the photo; the OCR text below is the same document and is more reliable for numbers.\n"
+        "You file household paperwork. Look at the photo; the text below (if any) is the same document and is more reliable for numbers.\n"
         "Copy what is printed. Never invent a value: use an empty string or 0 when something is not printed.\n"
         "kind: receipt = proof of a purchase already paid; bill = an amount still to be paid; otherwise the closest document kind.\n"
         "issuer: the shop or company name. location: the shop's branch, suburb or street address.\n"
-        "Printed dates are Australian, day first (DD/MM/YYYY). Answer all dates as YYYY-MM-DD.\n"
+        + {"DMY": "Printed dates are day first (DD/MM/YYYY).", "MDY": "Printed dates are month first (MM/DD/YYYY).",
+           "YMD": "Printed dates are year first (YYYY/MM/DD)."}.get(DATE_ORDER, "") + " Answer all dates as YYYY-MM-DD.\n"
         "date: for a receipt the purchase date; for a bill the issue date, or if none is printed the LAST day of the billing period (never its first day). due_date: the pay-by date if printed.\n"
-        "total = final amount. gst = GST or tax amount if printed.\n"
+        f"total = final amount. gst = the {TAX_LABEL} or other tax amount if printed.\n"
         "payment_method: Card if it mentions card, EFTPOS, Visa, Mastercard, or tap; Cash if cash; else Unknown.\n"
         "items: one entry per purchased product, empty list if not a receipt or bill. price = the amount in the right-hand price column for that product,\n"
         "  which is what was paid for the whole line. A line like '0.462 kg NET @ $7.90/kg' or 'Qty 2 @ $2.75 each' is not the price: it belongs to the product above it,\n"
@@ -400,7 +453,8 @@ def apply(con, paperless_id, info, owner, confirmed=False):
 
 
 def save_manual(con, doc_id, info, owner):
-    """Ledger rows for an entry typed in without a photo (nothing goes to Paperless)."""
+    """Ledger rows keyed by the app's own document id: entries typed in without a photo, and every
+    document when the app runs without Paperless."""
     with lock:
         con.execute("delete from items where purchase_id in (select id from purchases where doc_id=?)", (doc_id,))
         con.execute("delete from purchases where doc_id=?", (doc_id,))
@@ -421,7 +475,8 @@ def forget(con, doc):
         if doc["paperless_id"]:
             con.execute("delete from items where purchase_id in (select id from purchases where paperless_id=?)", (doc["paperless_id"],))
             con.execute("delete from purchases where paperless_id=?", (doc["paperless_id"],))
-            pl.delete(f"{PAPERLESS}/documents/{doc['paperless_id']}/", timeout=60)
+            if PAPERLESS:
+                pl.delete(f"{PAPERLESS}/documents/{doc['paperless_id']}/", timeout=60)
         if doc["photo"]:
             base = os.path.join(PHOTOS, doc["photo"])[:-4]
             for p in (base + ".jpg", base + ".small.jpg", base + ".pdf"):
@@ -447,8 +502,12 @@ DATE = re.compile(r"(?<!\d)([0-3]?\d)[/.-]([01]?\d)[/.-]((?:19|20)\d\d|\d\d)(?!\
 
 
 def printed_date(text):
-    """First date printed on the document, read day first (Australian), as YYYY-MM-DD."""
+    """First date printed on the document, read in DATE_ORDER, as YYYY-MM-DD."""
+    if DATE_ORDER == "YMD":
+        return None   # year-first dates are already unambiguous; the model's answer stands
     for d, m, y in DATE.findall(text or ""):
+        if DATE_ORDER == "MDY":
+            d, m = m, d
         y = int(y) + (2000 if len(y) == 2 else 0)
         try:
             return datetime(y, int(m), int(d)).strftime("%Y-%m-%d")
@@ -500,6 +559,25 @@ def amounts_from_text(info, text):
         for item, amount in zip(info["items"], found):
             item["price"] = amount
             item["qty"] = 1
+
+
+def likely_date(value, taken):
+    """With no text to read the date from, the model may swap day and month (10/11 read as 11 Oct).
+    When the swapped reading is also a real date, keep whichever is not in the future and nearer the
+    day the photo was taken: receipts are photographed soon after the purchase."""
+    try:
+        d = datetime.fromisoformat(value)
+        ref = datetime.fromisoformat(taken) if taken else datetime.now()
+    except (TypeError, ValueError):
+        return value
+    if d.day > 12 or d.day == d.month:
+        return value
+    try:
+        swapped = d.replace(month=d.day, day=d.month)
+    except ValueError:
+        return value
+    ok = [x for x in (d, swapped) if x <= ref]
+    return min(ok, key=lambda x: ref - x).strftime("%Y-%m-%d") if ok else value
 
 
 def printed_number(text):
@@ -631,7 +709,7 @@ def handle(con, doc):
 def _handle(con, doc):
     log(f"reading document {doc['id']} ({doc['source']}, {doc['owner'] or 'no owner'})")
     paperless_id = doc["paperless_id"]
-    if not paperless_id:
+    if not paperless_id and PAPERLESS:
         check_cancel(con, doc["id"])
         set_status(con, doc["id"], "uploading")
         original = doc["original"]   # a PDF goes to Paperless as the PDF, so its text layer is used
@@ -656,7 +734,10 @@ def _handle(con, doc):
     barcode = read_barcodes(photo_path(con, {**dict(doc), "paperless_id": paperless_id}, small=False))
     check_cancel(con, doc["id"])
     set_status(con, doc["id"], "reading", barcode=barcode)
-    content = pl.get(f"{PAPERLESS}/documents/{paperless_id}/", timeout=60).json().get("content", "")
+    if PAPERLESS:
+        content = pl.get(f"{PAPERLESS}/documents/{paperless_id}/", timeout=60).json().get("content", "")
+    else:   # no OCR without Paperless: a PDF's own text, or the photo alone
+        content = pdf_text(os.path.join(PHOTOS, doc["original"])) if doc["original"] else ""
     with open(photo_path(con, {**dict(doc), "paperless_id": paperless_id}), "rb") as fh:
         small = fh.read()
     try:
@@ -664,7 +745,7 @@ def _handle(con, doc):
         if info["kind"] in SPENDING:
             info["document_number"] = info["document_number"] or printed_number(content)
             if info["kind"] == "receipt":   # a receipt prints one date; a bill has several (period, issue, due)
-                info["date"] = printed_date(content) or info["date"]   # the model sometimes reads 08/11 as 11 Aug
+                info["date"] = printed_date(content) or likely_date(info["date"], doc["taken"])   # the model sometimes reads 08/11 as 11 Aug
             else:
                 amounts_from_text(info, content)
                 start, end = billing_period(content)
@@ -677,9 +758,12 @@ def _handle(con, doc):
     if not barcode and len(info["barcode_number"]) >= 8:
         con.execute("update docs set barcode=? where id=?", (info["barcode_number"], doc["id"])); con.commit()
     check_cancel(con, doc["id"])
-    apply(con, paperless_id, info, doc["owner"])
+    if PAPERLESS:
+        apply(con, paperless_id, info, doc["owner"])
+    else:
+        save_manual(con, doc["id"], info, doc["owner"])
     set_status(con, doc["id"], "review", info=json.dumps(info), error=same_as(con, doc["id"], info))
-    log(f"  read as {KINDS[info['kind']]['label']} -> Paperless document {paperless_id}" + (f", total {info['total']}, {len(info['items'])} items" if info["kind"] in SPENDING else ""))
+    log(f"  read as {KINDS[info['kind']]['label']}" + (f" -> Paperless document {paperless_id}" if PAPERLESS else "") + (f", total {info['total']}, {len(info['items'])} items" if info["kind"] in SPENDING else ""))
 
 
 def album_asset_ids(album_id):

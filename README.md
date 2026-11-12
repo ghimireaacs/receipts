@@ -1,6 +1,6 @@
 # Receipts
 
-A self-hosted phone app for receipts, bills and household paperwork. Take a photo, or pick a PDF, and a local vision model reads it: what it is, who issued it, the date, the total, the tax and every line item. The document is filed in [Paperless-ngx](https://docs.paperless-ngx.com/), and the purchase goes into an item-level spending ledger, so "how much did we spend on milk this year" has an answer.
+A self-hosted phone app for receipts, bills and household paperwork. Take a photo, or pick a PDF, and a local vision model reads it: what it is, who issued it, the date, the total, the tax and every line item. The purchase goes into an item-level spending ledger, so "how much did we spend on milk this year" has an answer, and, if you run [Paperless-ngx](https://docs.paperless-ngx.com/), the document is filed there too.
 
 Everything runs on your own hardware. The model runs in [Ollama](https://ollama.com/), and nothing is sent to a cloud service.
 
@@ -26,7 +26,7 @@ It is meant to stay small, and to do these few jobs well rather than many jobs s
 
 - **One container, one database file.** Python, FastAPI and SQLite. It needs no database server, no queue and no build step for the phone app.
 - **The model only suggests.** Nothing counts until a person has confirmed it.
-- **Use what you already run.** Paperless does OCR and the archive, Wallos does reminders, Immich and your sign-in proxy are optional. Each is a URL and a key, and the app works without the optional ones.
+- **Use what you already run.** Only a model is required. Paperless (OCR and the archive), Wallos (reminders), Immich and a sign-in proxy are optional: each is a URL and a key in `.env`, and compose can start Ollama and Paperless for you if you don't run them yet.
 - **Local only.** Photos, PDFs and the model's answers stay on your own servers.
 - **Not a budgeting app.** It has no bank sync, budgets, accounts or forecasts, and no plans for them. It records what was spent, from the paper that proves it, and adds it up.
 - **Configured, not coded.** The household (how many people, their names, who is in charge), the document kinds and the categories are settings, not code changes.
@@ -50,7 +50,7 @@ The spending totals always cover the whole household. They show a breakdown per 
 - **Filing.** On confirm, Paperless gets the document type, storage path, correspondent, title, tags and custom fields. The ledger gets one row per purchase and one per item.
 - **Spending.** Totals by week, month or quarter, a chart of the last eight periods, breakdowns by category, shop and person, and a search across items.
 - **No receipt?** Add an expense by hand (petrol, cash). It counts in the ledger and the totals; nothing goes to Paperless.
-- **Duplicates.** The same file sent twice is refused. Two different photos of one receipt or bill are flagged when they share a barcode, the printed transaction or invoice number, the same shop, date and total, or (for bills) the same biller and amount within a month.
+- **Duplicates.** The same file sent twice is flagged at once (by its checksum). Two different photos of one receipt or bill are flagged when they share a barcode, the printed transaction or invoice number, the same shop, date and total, or (for bills) the same biller and amount within a month.
 - **Bills to Wallos (optional).** A confirmed bill with a due date creates or updates its entry in [Wallos](https://github.com/ellite/Wallos), which then sends the payment reminder through whatever channel Wallos is set up for (Mattermost, ntfy, email, Discord and others).
 - **Immich (optional).** Photos added to an [Immich](https://immich.app/) album named `Paperless` are taken in too, then removed from the album.
 
@@ -74,7 +74,7 @@ The container is a small Python service: FastAPI for the app and its API, a back
 |---|---|---|
 | Docker with Compose | Yes | |
 | [Ollama](https://ollama.com/) with a vision model | Yes | Tested with `gemma3:4b` (about 3.3 GB). A GPU with 6 GB is enough; on CPU alone a receipt takes minutes instead of about 30 seconds. |
-| [Paperless-ngx](https://docs.paperless-ngx.com/) | Yes | Provides the OCR text and the archive |
+| [Paperless-ngx](https://docs.paperless-ngx.com/) | Optional | OCR text (better numbers from photos) and the archive. Without it the app keeps its own copy of every photo and PDF. |
 | A reverse proxy with HTTPS | Strongly advised | iPhones only install the app to the home screen, and keep photos offline, over HTTPS |
 | [Wallos](https://github.com/ellite/Wallos) | Optional | Bill reminders |
 | [Immich](https://immich.app/) | Optional | A second way in |
@@ -89,20 +89,27 @@ The container is a small Python service: FastAPI for the app and its API, a back
    cp .env.example .env
    ```
 
-2. **Fill in `.env`.** At least `PAPERLESS_URL`, `PAPERLESS_TOKEN`, `OLLAMA_URL`, `APP_PASSCODE` and `PEOPLE`. The URLs must be reachable from inside the container. A Paperless token is under My Profile → API Auth Token.
+2. **Pick your setup.** One `compose.yml` covers all of them. Turn on a profile for each service you want compose to run; for one you already run, put its address in `.env` instead.
 
-3. **Pull the model** on the Ollama host:
+   | You already run | Start with | In `.env` |
+   |---|---|---|
+   | Nothing | `docker compose --profile ollama up -d --build` | `OLLAMA_URL=http://ollama:11434`, `PAPERLESS_URL` empty |
+   | Nothing, and you want Paperless too | `docker compose --profile ollama --profile paperless up -d --build` | also `PAPERLESS_URL=http://paperless:8000` and `PAPERLESS_USER` / `PAPERLESS_PASSWORD` |
+   | Ollama | `docker compose up -d --build` | `OLLAMA_URL=http://<its address>:11434` |
+   | Ollama and Paperless | `docker compose up -d --build` | both addresses, and a Paperless token or user and password |
+
+   Also set `APP_PASSCODE`, `PEOPLE`, and your `CURRENCY`, `DATE_ORDER` and `TAX_LABEL`.
+
+3. **Pull the model** (once), on the Ollama host or with `docker compose exec ollama`:
 
    ```bash
    ollama pull gemma3:4b
    ```
 
-4. **Build, and prepare Paperless.** The setup command creates the document types, tags, storage paths and custom fields the app files into. It only adds what is missing and never changes what is already there.
+4. **With Paperless only: prepare it** (once). This creates the document types, tags, storage paths and custom fields the app files into. It only adds what is missing and never changes what is already there.
 
    ```bash
-   docker compose build
    docker compose run --rm receipt-bridge python setup_paperless.py
-   docker compose up -d
    ```
 
 5. **Open it** at `http://<host>:8098`, or at your proxy's HTTPS address. Enter the passcode, then add it to the home screen:
@@ -127,8 +134,9 @@ Every connection is a URL and a key in `.env`; nothing has to be in the same Com
 
 ### Paperless-ngx
 
+- **Without it:** leave `PAPERLESS_URL` empty. Photos and PDFs stay in `PHOTO_STORE`, the model reads the photo (and a PDF's own text), and the categories come from `CATEGORIES` and `PAYMENT_METHODS`. You lose OCR, which helps the model with numbers on photos, and Paperless's archive and search.
 - **`PAPERLESS_URL`:** the internal address, for example `http://192.0.2.10:8000`. A public HTTPS name works too.
-- **`PAPERLESS_TOKEN`:** a token for a user who may create documents, tags, fields and correspondents.
+- **`PAPERLESS_TOKEN`**, or **`PAPERLESS_USER` and `PAPERLESS_PASSWORD`** (the app fetches a token itself): a user who may create documents, tags, fields and correspondents.
 - **Setup:** run `setup_paperless.py` once (step 4). These are the names it creates and the app looks up:
 
   | Kind | Names |
@@ -178,14 +186,18 @@ Every connection is a URL and a key in `.env`; nothing has to be in the same Com
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `PAPERLESS_URL`, `PAPERLESS_TOKEN` | required | Paperless API |
+| `PAPERLESS_URL` | empty | Paperless API; empty = run without Paperless |
+| `PAPERLESS_TOKEN` or `PAPERLESS_USER`, `PAPERLESS_PASSWORD` | empty | Paperless login (a token, or a user the app gets a token for) |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | `gemma3:4b` | The vision model |
-| `DB_DIR` | required | Folder for `ledger.db` and the session key. Use a local disk: SQLite on a network share can be corrupted. |
-| `PHOTO_STORE` | required | Photos (`photos/`: full size, a smaller copy, and the original of a PDF) and the daily ledger copy (`backup/`) |
+| `DB_DIR` | `./data/db` | Folder for `ledger.db` and the session key. Use a local disk: SQLite on a network share can be corrupted. |
+| `PHOTO_STORE` | `./data/store` | Photos (`photos/`: full size, a smaller copy, and the original of a PDF) and the daily ledger copy (`backup/`) |
 | `APP_BIND`, `APP_PORT` | `127.0.0.1`, `8098` | Where the app listens on the host |
 | `APP_PASSCODE` | empty | Shared passcode; empty means no sign-in |
 | `PEOPLE` | empty | `Name`, or `Name:paperless-tag-id:immich-user-id`; comma separated |
-| `CURRENCY` | `AUD` | ISO code for Paperless amounts |
+| `CURRENCY` | `AUD` | ISO code for amounts |
+| `DATE_ORDER` | `DMY` | How dates are printed on your receipts: `DMY`, `MDY` or `YMD` |
+| `TAX_LABEL` | `GST` | What receipts call the tax (`VAT`, `Tax` ...); used in the form and the model's instructions |
+| `CATEGORIES`, `PAYMENT_METHODS` | built-in lists | Comma separated. Without Paperless they are the choices; with Paperless the select fields there are, and these seed `setup_paperless.py`. |
 | `AUTH_PEOPLE`, `PROXY_IPS` | empty | Proxy username → person, and the addresses allowed to send the header |
 | `ADMINS` | empty | People (names from `PEOPLE`) who may act for everyone when `AUTH_PEOPLE` is set |
 | `IMMICH_URL`, `IMMICH_API_KEY`, `ALBUM_NAME`, `POLL_SECONDS` | empty, `Paperless`, `120` | Immich intake |
@@ -223,7 +235,7 @@ The ledger's tables are updated in place on start. On the phone, close the app a
 ## Known limits
 
 - A small model reads shops, totals, tax and dates well, and item categories less well. That's why every document waits for a check.
-- Dates are read day first (DD/MM/YYYY), and the tax field is called GST, both as on Australian bills.
+- Amounts are read with a decimal point (`12.50`); a decimal comma (`12,50`) isn't handled yet.
 - iPhone home-screen apps can't upload in the background: a waiting photo goes the next time the app is open.
 - Barcodes on folded or crumpled receipts usually can't be decoded; the other duplicate checks still apply.
-- Paperless is required, for OCR and the archive.
+- Without Paperless there is no OCR: on a photo the model reads the numbers from the image alone, which is less reliable. When the day and month of a date could be swapped, the app keeps the reading nearer the day the photo was taken.

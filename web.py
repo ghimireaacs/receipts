@@ -125,7 +125,7 @@ def config(request: Request):
     name, admin = who(request)
     if AUTH_PEOPLE and not name:
         return {"locked": False, "denied": "Your sign-in isn't linked to a person in this app. Ask the admin to add you."}
-    return {"locked": False, "me": name, "admin": admin,
+    return {"locked": False, "me": name, "admin": admin, "paperless": bool(bridge.PAPERLESS), "tax_label": bridge.TAX_LABEL,
             "people": allowed_people(request),
             "kinds": [{"key": k, "label": v["label"], "spending": k in bridge.SPENDING, "fields": v["fields"]} for k, v in bridge.KINDS.items()],
             "categories": bridge.options("Expense category"),
@@ -206,7 +206,7 @@ async def manual(request: Request):
 @app.put("/api/docs/{doc_id}")
 async def save(doc_id: int, request: Request):
     d = get_doc(doc_id); check_access(request, d)
-    if d["source"] == "manual":
+    if d["source"] == "manual" or not bridge.PAPERLESS:
         info = bridge.clean(await request.json(), d["taken"])
         bridge.save_manual(con(), doc_id, info, d["owner"])
         try:

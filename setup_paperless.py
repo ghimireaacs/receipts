@@ -18,11 +18,8 @@ STORAGE_PATHS = {   # name -> path template (Paperless placeholders)
     "Vital": "Vital/{{ document_type }}/{{ title }}",
     "Financial": "Financial/{{ created_year }}/{{ document_type }}/{{ title }}",
 }
-CATEGORIES = ["Groceries", "Household & kitchen", "Dining & takeaway", "Transport & fuel", "Utilities & internet",
-              "Rent & housing", "Health & pharmacy", "Clothing", "Electronics & tech", "Subscriptions", "Education",
-              "Gifts & donations", "Travel", "Entertainment", "Insurance", "Fees, tax & government",
-              "Furniture & appliances", "Personal care", "Other"]
-METHODS = ["Card", "Cash", "Bank transfer", "Direct debit", "Other"]
+CATEGORIES = bridge.CATEGORIES   # set CATEGORIES / PAYMENT_METHODS in .env before running this to start with your own
+METHODS = bridge.METHODS
 FIELDS = {   # name -> (Paperless data type, extra data)
     "Amount": ("monetary", {"default_currency": bridge.CURRENCY}),
     "GST": ("monetary", {"default_currency": bridge.CURRENCY}),
@@ -49,6 +46,8 @@ def create(kind, body):
 
 
 def main():
+    if not PAPERLESS:
+        raise SystemExit("PAPERLESS_URL is empty: the app runs without Paperless, nothing to set up.")
     pl.get(f"{PAPERLESS}/ui_settings/", timeout=30).raise_for_status()   # fails early on a bad URL or token
     added = 0
     have = existing("document_types")

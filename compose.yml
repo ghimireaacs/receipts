@@ -1,4 +1,11 @@
-# Receipts: the phone app and the worker that files photos into Paperless.
+# Receipts. One file for every setup:
+#
+#   docker compose up -d                                   app only: point .env at your own Ollama (and Paperless)
+#   docker compose --profile ollama up -d                  also run Ollama here
+#   docker compose --profile paperless up -d               also run Paperless here
+#   docker compose --profile ollama --profile paperless up -d    everything here
+#
+# Already run Ollama or Paperless? Leave its profile off and put its address in .env.
 # DB_DIR holds the SQLite ledger (keep it on a local disk, not a network share);
 # PHOTO_STORE holds the photos and a daily copy of the ledger.
 name: receipt-bridge
@@ -12,9 +19,54 @@ services:
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8098}:8000"
     volumes:
-      - ${DB_DIR:?set DB_DIR in .env}:/db
-      - ${PHOTO_STORE:?set PHOTO_STORE in .env}:/data
+      - ${DB_DIR:-./data/db}:/db
+      - ${PHOTO_STORE:-./data/store}:/data
     deploy:
       resources:
         limits:
           memory: 768M
+
+  # ---- optional: Ollama (the model). With it: OLLAMA_URL=http://ollama:11434 ----
+  ollama:
+    profiles: [ollama]
+    image: ollama/ollama:0.12.6
+    container_name: receipts-ollama
+    restart: unless-stopped
+    volumes:
+      - ${OLLAMA_DIR:-./data/ollama}:/root/.ollama
+    # First start: docker compose exec ollama ollama pull gemma3:4b
+    # With an NVIDIA card and the NVIDIA container toolkit, uncomment for GPU speed:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ---- optional: Paperless-ngx (OCR and the archive). With it: PAPERLESS_URL=http://paperless:8000 ----
+  paperless:
+    profiles: [paperless]
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.14.7
+    container_name: receipts-paperless
+    restart: unless-stopped
+    depends_on: [paperless-redis]
+    ports:
+      - "${PAPERLESS_BIND:-127.0.0.1}:${PAPERLESS_PORT:-8010}:8000"
+    environment:
+      PAPERLESS_REDIS: redis://paperless-redis:6379
+      PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY:-change-me-to-a-long-random-string}
+      PAPERLESS_ADMIN_USER: ${PAPERLESS_USER:-admin}
+      PAPERLESS_ADMIN_PASSWORD: ${PAPERLESS_PASSWORD:-change-me}
+      PAPERLESS_OCR_LANGUAGE: ${PAPERLESS_OCR_LANGUAGE:-eng}
+      PAPERLESS_TIME_ZONE: ${TZ:-UTC}
+    volumes:
+      - ${PAPERLESS_DIR:-./data/paperless}/data:/usr/src/paperless/data
+      - ${PAPERLESS_DIR:-./data/paperless}/media:/usr/src/paperless/media
+      - ${PAPERLESS_DIR:-./data/paperless}/consume:/usr/src/paperless/consume
+
+  paperless-redis:
+    profiles: [paperless]
+    image: redis:7.4-alpine
+    container_name: receipts-paperless-redis
+    restart: unless-stopped

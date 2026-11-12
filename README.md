@@ -90,7 +90,7 @@ The container is a small Python service: FastAPI for the app and its API, a back
 |---|---|---|
 | Docker with Compose | Yes | |
 | [Ollama](https://ollama.com/) with a vision model | Yes | Tested with `gemma3:4b` (about 3.3 GB). A GPU with 6 GB is enough; on CPU alone a receipt takes minutes instead of about 30 seconds. |
-| [Paperless-ngx](https://docs.paperless-ngx.com/) | Yes | Provides the OCR text and the archive |
+| [Paperless-ngx](https://docs.paperless-ngx.com/) | Yes | Provides the OCR text and the archive. Don't want Paperless? The [`dev` branch](https://github.com/ghimireaacs/receipts/tree/dev) runs without it (still being tested). |
 | A reverse proxy with HTTPS | Strongly advised | iPhones only install the app to the home screen, and keep photos offline, over HTTPS |
 | [Wallos](https://github.com/ellite/Wallos) | Optional | Bill reminders |
 | [Immich](https://immich.app/) | Optional | A second way in |
@@ -242,4 +242,4 @@ The ledger's tables are updated in place on start. On the phone, close the app a
 - Dates are read day first (DD/MM/YYYY), and the tax field is called GST, both as on Australian bills.
 - iPhone home-screen apps can't upload in the background: a waiting photo goes the next time the app is open.
 - Barcodes on folded or crumpled receipts usually can't be decoded; the other duplicate checks still apply.
-- Paperless is required, for OCR and the archive.
+- Paperless is required, for OCR and the archive. The [`dev` branch](https://github.com/ghimireaacs/receipts/tree/dev) can run without it; it isn't released yet.

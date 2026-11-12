@@ -15,11 +15,53 @@ AUTH_PEOPLE = dict(p.split("=", 1) for p in os.environ.get("AUTH_PEOPLE", "").sp
 PROXY_IPS = {ip.strip() for ip in os.environ.get("PROXY_IPS", "").split(",") if ip.strip()}
 
 
+# People who may add, see and change documents for everyone. Names as in PEOPLE.
+ADMINS = {a.strip() for a in os.environ.get("ADMINS", "").split(",") if a.strip()}
+NAMES = [p["name"] for p in bridge.PEOPLE]
+
+
 def me(request):
     # trust the header only from the proxy, else anyone on the LAN could claim to be anyone
-    if PROXY_IPS and (request.client.host if request.client else "") not in PROXY_IPS:
+    peer = request.client.host if request.client else ""
+    if PROXY_IPS and peer not in PROXY_IPS:
+        if request.headers.get("x-authentik-username"):
+            bridge.log(f"sign-in header ignored: request came from {peer}, not from PROXY_IPS")
         return None
     return AUTH_PEOPLE.get(request.headers.get("x-authentik-username", ""))
+
+
+def who(request):
+    """(name, is_admin). With sign-in per person (AUTH_PEOPLE), each person acts as themselves and
+    only ADMINS act for others; a request with no known person gets (None, False). Without it (one
+    shared passcode, or none) there is no way to tell people apart, so everyone acts for everyone."""
+    if not AUTH_PEOPLE:
+        return None, True
+    name = me(request)
+    return name, bool(name and name in ADMINS)
+
+
+def allowed_people(request):
+    name, admin = who(request)
+    return NAMES if admin else ([name] if name else [])
+
+
+def owner_for(request, asked):
+    """The person a new entry belongs to: an admin may pick anyone, everyone else only themselves."""
+    name, admin = who(request)
+    if admin:
+        owner = asked or name or ""
+        if owner and owner not in NAMES:
+            raise HTTPException(400, "Unknown person")
+        return owner or None
+    if asked and asked != name:
+        raise HTTPException(403, "You can only add entries in your own name")
+    return name
+
+
+def check_access(request, doc):
+    name, admin = who(request)
+    if not admin and doc["owner"] != name:
+        raise HTTPException(404, "No such document")   # 404, not 403: don't confirm it exists
 COOKIE = "receipts_session"
 MAX_BYTES = 30 * 1024 * 1024
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +99,8 @@ async def guard(request: Request, call_next):
     path = request.url.path
     if path.startswith("/api/") and path not in ("/api/login", "/api/config") and not signed_in(request):
         return JSONResponse({"detail": "Passcode needed"}, status_code=401)
+    if path.startswith("/api/") and path != "/api/config" and AUTH_PEOPLE and not me(request):
+        return JSONResponse({"detail": "Your sign-in isn't linked to a person in this app"}, status_code=403)
     response = await call_next(request)
     if not path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-cache"   # the app shell must pick up new versions
@@ -78,8 +122,11 @@ async def login(request: Request, response: Response):
 def config(request: Request):
     if not signed_in(request):
         return {"locked": True}
-    return {"locked": False, "me": me(request),
-            "people": [p["name"] for p in bridge.PEOPLE],
+    name, admin = who(request)
+    if AUTH_PEOPLE and not name:
+        return {"locked": False, "denied": "Your sign-in isn't linked to a person in this app. Ask the admin to add you."}
+    return {"locked": False, "me": name, "admin": admin,
+            "people": allowed_people(request),
             "kinds": [{"key": k, "label": v["label"], "spending": k in bridge.SPENDING, "fields": v["fields"]} for k, v in bridge.KINDS.items()],
             "categories": bridge.options("Expense category"),
             "methods": bridge.options("Payment method") + ["Unknown"]}
@@ -105,12 +152,10 @@ def get_doc(doc_id):
 
 @app.post("/api/docs")
 def upload(request: Request, file: UploadFile = File(...), owner: str = Form(""), client_id: str = Form("")):
-    owner = owner or me(request) or ""
+    owner = owner_for(request, owner)
     raw = file.file.read(MAX_BYTES + 1)
     if len(raw) > MAX_BYTES:
         raise HTTPException(413, "Photo is larger than 30 MB")
-    if owner and owner not in [p["name"] for p in bridge.PEOPLE]:
-        raise HTTPException(400, "Unknown person")
     ref = "app:" + (client_id or secrets.token_hex(8))[:64]
     try:
         doc_id = bridge.add_doc(con(), raw, owner or None, "app", ref)
@@ -120,26 +165,27 @@ def upload(request: Request, file: UploadFile = File(...), owner: str = Form("")
 
 
 @app.get("/api/docs")
-def docs(show: str = "check", limit: int = 60):
+def docs(request: Request, show: str = "check", limit: int = 60):
     where = {"check": "status in ('queued','uploading','reading','review','failed','duplicate','cancel')",
              "done": "status = 'done'"}.get(show, "status != 'deleted'")
-    rows = con().execute(f"select * from docs where {where} and status != 'deleted' order by id desc limit ?", (min(limit, 300),)).fetchall()
-    waiting = con().execute("select count(*) from docs where status in ('review','failed','duplicate')").fetchone()[0]
+    name, admin = who(request)
+    mine, args = ("", ()) if admin else (" and owner = ?", (name,))
+    rows = con().execute(f"select * from docs where {where} and status != 'deleted'{mine} order by id desc limit ?", (*args, min(limit, 300))).fetchall()
+    waiting = con().execute(f"select count(*) from docs where status in ('review','failed','duplicate'){mine}", args).fetchone()[0]
     return {"docs": [row(d) for d in rows], "waiting": waiting}
 
 
 @app.get("/api/docs/{doc_id}")
-def doc(doc_id: int):
-    return row(get_doc(doc_id), full=True)
+def doc(request: Request, doc_id: int):
+    d = get_doc(doc_id); check_access(request, d)
+    return row(d, full=True)
 
 
 @app.post("/api/manual")
 async def manual(request: Request):
     """An expense with no photo (petrol with no receipt, cash, ...): ledger only."""
     body = await request.json()
-    owner = body.get("owner") or me(request)
-    if owner and owner not in [p["name"] for p in bridge.PEOPLE]:
-        raise HTTPException(400, "Unknown person")
+    owner = owner_for(request, body.get("owner"))
     info = bridge.clean(body, time.strftime("%Y-%m-%d"))
     if info["kind"] not in bridge.SPENDING or not info["total"]:
         raise HTTPException(400, "A manual entry needs an amount")
@@ -159,7 +205,7 @@ async def manual(request: Request):
 
 @app.put("/api/docs/{doc_id}")
 async def save(doc_id: int, request: Request):
-    d = get_doc(doc_id)
+    d = get_doc(doc_id); check_access(request, d)
     if d["source"] == "manual":
         info = bridge.clean(await request.json(), d["taken"])
         bridge.save_manual(con(), doc_id, info, d["owner"])
@@ -185,8 +231,8 @@ async def save(doc_id: int, request: Request):
 
 
 @app.post("/api/docs/{doc_id}/reread")
-def reread(doc_id: int):
-    d = get_doc(doc_id)
+def reread(request: Request, doc_id: int):
+    d = get_doc(doc_id); check_access(request, d)
     if d["status"] in ("uploading", "reading"):
         raise HTTPException(409, "Already being read")
     if d["status"] == "duplicate":
@@ -197,8 +243,8 @@ def reread(doc_id: int):
 
 
 @app.delete("/api/docs/{doc_id}")
-def delete(doc_id: int):
-    d = get_doc(doc_id)
+def delete(request: Request, doc_id: int):
+    d = get_doc(doc_id); check_access(request, d)
     if d["status"] in ("uploading", "reading"):
         # the worker is on it: it stops at its next step and removes everything
         bridge.set_status(con(), doc_id, "cancel")
@@ -208,8 +254,9 @@ def delete(doc_id: int):
 
 
 @app.get("/api/docs/{doc_id}/photo")
-def photo(doc_id: int, size: str = "small"):
-    path = bridge.photo_path(con(), get_doc(doc_id), small=size != "full")
+def photo(request: Request, doc_id: int, size: str = "small"):
+    d = get_doc(doc_id); check_access(request, d)
+    path = bridge.photo_path(con(), d, small=size != "full")
     if not path or not os.path.exists(path):
         raise HTTPException(404, "No photo")
     return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})

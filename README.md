@@ -29,7 +29,18 @@ It is meant to stay small, and to do these few jobs well rather than many jobs s
 - **Use what you already run.** Paperless does OCR and the archive, Wallos does reminders, Immich and your sign-in proxy are optional. Each is a URL and a key, and the app works without the optional ones.
 - **Local only.** Photos, PDFs and the model's answers stay on your own servers.
 - **Not a budgeting app.** It has no bank sync, budgets, accounts or forecasts, and no plans for them. It records what was spent, from the paper that proves it, and adds it up.
-- **Configured, not coded.** The household (how many people, their names), the document kinds and the categories are settings, not code changes.
+- **Configured, not coded.** The household (how many people, their names, who is in charge), the document kinds and the categories are settings, not code changes.
+
+## People and permissions
+
+The household is a list of names in `PEOPLE`. Who may do what depends on how people sign in:
+
+| Sign-in | Who can add, see and change entries |
+|---|---|
+| A sign-in proxy that names each person (`AUTH_PEOPLE` set) | Each person only their own. People listed in `ADMINS` may add, see and change entries for anyone. Someone signed in who isn't in `AUTH_PEOPLE` can't use the app. |
+| One shared passcode, or none | Everyone, for everyone. The app can't tell people apart. |
+
+The spending totals always cover the whole household. They show a breakdown per person, but not anyone's documents.
 
 ## What it does
 
@@ -160,7 +171,7 @@ Every connection is a URL and a key in `.env`; nothing has to be in the same Com
   PROXY_IPS=192.0.2.10
   ```
 
-  The app reads the username from the `X-authentik-username` header, and trusts it only from the addresses in `PROXY_IPS`. With another proxy, pass its username header on under that name (Authelia sends `Remote-User`). Make the proxy's sessions long: phones close browser sessions often, and every expiry means signing in again.
+  The app reads the username from the `X-authentik-username` header, and trusts it only when the connection itself comes from an address in `PROXY_IPS` (`X-Forwarded-For` is ignored, so the header can't be faked from elsewhere on the network). Requests with no known person are refused, including ones made straight to the app's port. With another proxy, pass its username header on under that name (Authelia sends `Remote-User`). Make the proxy's sessions long: phones close browser sessions often, and every expiry means signing in again.
 - **Traefik with Authentik's embedded outpost.** Put the forward-auth middleware on the app's router, and add a second router for `Host(...) && PathPrefix(/outpost.goauthentik.io/)` that goes to Authentik.
 
 ## Settings
@@ -176,6 +187,7 @@ Every connection is a URL and a key in `.env`; nothing has to be in the same Com
 | `PEOPLE` | empty | `Name`, or `Name:paperless-tag-id:immich-user-id`; comma separated |
 | `CURRENCY` | `AUD` | ISO code for Paperless amounts |
 | `AUTH_PEOPLE`, `PROXY_IPS` | empty | Proxy username → person, and the addresses allowed to send the header |
+| `ADMINS` | empty | People (names from `PEOPLE`) who may act for everyone when `AUTH_PEOPLE` is set |
 | `IMMICH_URL`, `IMMICH_API_KEY`, `ALBUM_NAME`, `POLL_SECONDS` | empty, `Paperless`, `120` | Immich intake |
 | `WALLOS_URL`, `WALLOS_API_KEY`, `WALLOS_NOTIFY_DAYS`, `WALLOS_CURRENCY_ID` | empty, `3`, `1` | Wallos bill sync |
 | `TZ` | | Time zone for dates and the start of the week |

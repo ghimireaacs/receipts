@@ -379,6 +379,12 @@ function showLock() {
 async function start() {
   try { config = await api("config"); } catch { status("Cannot reach the server. Photos you take now are sent later."); }
   if (config && config.locked) return showLock();
+  if (config && config.denied) {
+    $("#app").hidden = true; $("#lock").hidden = false;
+    $("#lock-form").innerHTML = `<h1>Receipts</h1><p class="error"></p>`;
+    $("#lock-form .error").textContent = config.denied;
+    return;
+  }
   $("#lock").hidden = true; $("#app").hidden = false;
   if (!config) return;
   renderWho();

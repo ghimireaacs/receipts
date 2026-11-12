@@ -1,6 +1,6 @@
 // Keeps the app shell available when the server cannot be reached, so photos can still be taken.
 // The API is never cached.
-const CACHE = "receipts-v8";
+const CACHE = "receipts-v9";
 const SHELL = ["./", "index.html", "app.css", "app.js", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {

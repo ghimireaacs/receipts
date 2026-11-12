@@ -4,7 +4,7 @@
 ![branch](https://img.shields.io/badge/work%20happens%20on-dev-orange)
 ![scope](https://img.shields.io/badge/scope-small%20on%20purpose-green)
 
-What comes next, and what was decided against. The app stays small: [README → Design](README.md#design).
+What comes next, and what was decided against. The app is meant to stay small ([README, Design](README.md#design)).
 
 ## Branches and releases
 
@@ -27,8 +27,8 @@ Releases are tags on `main` (`v0.1.0`, `v0.2.0`, ...), with notes on what change
 | Cloud models (Claude, OpenAI) as an alternative to Ollama | ![planned](https://img.shields.io/badge/-planned-lightgrey) | M |
 | Prebuilt image on GHCR, so nobody has to build | ![planned](https://img.shields.io/badge/-planned-lightgrey) | S |
 | Decimal-comma amounts (`12,50`) | ![planned](https://img.shields.io/badge/-planned-lightgrey) | S |
-| LICENSE | ![owner](https://img.shields.io/badge/-owner%20decides-yellow) | — |
-| CSV, email and Actual Budget import | ![dropped](https://img.shields.io/badge/-not%20planned-red) | — |
+| LICENSE | ![owner](https://img.shields.io/badge/-owner%20decides-yellow) |  |
+| CSV, email and Actual Budget import | ![dropped](https://img.shields.io/badge/-not%20planned-red) |  |
 
 ## Cloud models
 
@@ -52,11 +52,11 @@ flowchart LR
     F --> G[To check → ledger, Paperless, Wallos]
 ```
 
-- **One setting picks the provider:** `MODEL_PROVIDER=ollama` (the default), `anthropic` or `openai`, with `MODEL` and the provider's API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
-- **One function per provider:** each takes the photo, the text and the PDF, and returns the same fields the app uses today. Everything after the model stays as it is.
-- **Claude:** through the official `anthropic` Python SDK, with structured outputs (`output_config.format` with the app's JSON schema). Photos are sent as image blocks. PDFs are sent as document blocks: Claude reads PDFs itself, so no OCR is needed. The code checks `stop_reason` for `refusal` before reading the answer.
-- **OpenAI:** through the official `openai` SDK, with its structured-output mode.
-- **Off by default.** Nothing leaves your network unless you set a cloud provider. The README says plainly what is sent and to whom.
+- One setting picks the provider: `MODEL_PROVIDER=ollama` (the default), `anthropic` or `openai`, with `MODEL` and the provider's API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
+- One function per provider: each takes the photo, the text and the PDF, and returns the same fields the app uses today. Everything after the model stays as it is.
+- Claude: through the official `anthropic` Python SDK, with structured outputs (`output_config.format` with the app's JSON schema). Photos are sent as image blocks. PDFs are sent as document blocks: Claude reads PDFs itself, so no OCR is needed. The code checks `stop_reason` for `refusal` before reading the answer.
+- OpenAI: through the official `openai` SDK, with its structured-output mode.
+- Off by default. Nothing leaves your network unless you set a cloud provider. The README says plainly what is sent and to whom.
 
 ### Models and rough cost per receipt
 
@@ -69,7 +69,7 @@ Estimates for a typical receipt (about 3,000 tokens in, 600 out), at list prices
 | Claude Opus 5.5 | `claude-opus-5-5` | about $0.024 | about $2.40 |
 | Ollama `gemma3:4b` | local | electricity | electricity |
 
-Haiku is the obvious starting point: extracting fields from a receipt is a small task.
+Haiku is where I'd start, since pulling fields off a receipt is a small job.
 
 ### Open questions
 
